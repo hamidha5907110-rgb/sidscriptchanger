@@ -1,0 +1,9 @@
+{
+  "name": "ai-server",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "express": "^4.18.2",
+    "@heyputer/puter.js": "^2.0.0"
+  }
+}
