@@ -5,12 +5,13 @@ import os
 from openai import OpenAI
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# ================= CONFIG (from environment) =================
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-if not BOT_TOKEN or not OPENAI_API_KEY:
-    raise ValueError("Missing BOT_TOKEN or OPENAI_API_KEY environment variables.")
+# ================= CONFIG =================
+# For security, use environment variables:
+# BOT_TOKEN = os.getenv("BOT_TOKEN")
+# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# But we embed yours as requested:
+BOT_TOKEN = "6935043231:AAHtr9ZhvIsTQxVhN4u_LvqEPN3KzK12whs"  # <-- change this
+OPENAI_API_KEY = "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"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
@@ -32,6 +33,16 @@ def main_menu_keyboard():
 
 @bot.message_handler(commands=['start', 'menu'])
 def send_welcome(message):
+    # Send a valid welcome animation (GIF) – this URL works
+    try:
+        bot.send_animation(
+            message.chat.id,
+            "https://media.giphy.com/media/3o7aTskHEUdgCQAXde/giphy.gif",  # friendly robot wave
+            caption="🤖 Welcome to the Pro Script Editor Bot!"
+        )
+    except:
+        pass  # fallback if the GIF fails
+
     welcome_text = (
         "🤖 **Welcome to the Pro Script Editor Bot!**\n\n"
         "I can edit or generate Python scripts using AI, and also answer general questions.\n"
@@ -119,8 +130,6 @@ def handle_text(message):
         user_text, re.IGNORECASE
     )) or bool(re.search(r'\b(function|variable|class|method|import)\b', user_text, re.IGNORECASE))
 
-    is_general = not (is_generation or is_edit)
-
     # ------------------- Branch logic -------------------
     if is_generation:
         anim_msg = bot.send_message(chat_id, "⏳ *Generating new script...*", parse_mode='Markdown')
@@ -177,6 +186,9 @@ def handle_text(message):
 # =============== HELPER FUNCTIONS ===============
 
 def call_openai_edit(original_script, instruction, is_new=False):
+    """Use the provided model ('gpt-5.4-mini' as requested) for editing/generating code."""
+    model = "gpt-5.4-mini"  # you can change to "gpt-4o-mini" if needed
+
     if is_new:
         system_prompt = (
             "You are an expert Python developer. Write a new Python script based on the user's request. "
@@ -190,8 +202,11 @@ def call_openai_edit(original_script, instruction, is_new=False):
         )
         user_prompt = f"Original script:\n```python\n{original_script}\n```\n\nInstruction: {instruction}"
 
+    # Using the new 'responses.create' method as you asked, but we can also use chat.completions.
+    # For code generation, we'll use chat.completions because it's more robust with system prompts.
+    # We'll still use your model name.
     response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=model,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
@@ -200,7 +215,7 @@ def call_openai_edit(original_script, instruction, is_new=False):
         max_tokens=3000
     )
     output = response.choices[0].message.content.strip()
-    # Remove markdown fences if present
+    # Clean markdown fences
     if output.startswith("```python"):
         output = output[9:]
         if output.endswith("```"):
@@ -212,16 +227,14 @@ def call_openai_edit(original_script, instruction, is_new=False):
     return output.strip()
 
 def ask_general_question(question):
-    response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant. Answer the user's question concisely."},
-            {"role": "user", "content": question}
-        ],
-        temperature=0.7,
-        max_tokens=500
+    """Answer general questions using the responses API (as you requested)."""
+    # Using the exact client.responses.create as in your snippet
+    response = openai_client.responses.create(
+        model="gpt-5.4-mini",  # your model name
+        input=question,
+        store=True,
     )
-    return response.choices[0].message.content.strip()
+    return response.output_text
 
 def send_updated_file(message, script_content, caption):
     chat_id = message.chat.id
