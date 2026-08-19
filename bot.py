@@ -2,17 +2,12 @@ import telebot
 import re
 import time
 import os
-import google.generativeai as genai
+import requests
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================= CONFIG =================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "6935043231:AAHtr9ZhvIsTQxVhN4u_LvqEPN3KzK12whs")
-GEMINI_API_KEY = "AQ.Ab8RN6JuAszSqx3NLGG5at_E-61MM6PYkhRLspY3esn21q862Q"  # your key
-
-# Configure Gemini
-genai.configure(api_key=GEMINI_API_KEY)
-# Use a stable model – you can change to "gemini-1.5-pro" or "gemini-2.0-flash-exp" if available
-GEMINI_MODEL = "gemini-1.5-flash"
+AI_SERVER_URL = os.getenv("AI_SERVER_URL", "http://localhost:3000")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -33,19 +28,18 @@ def main_menu_keyboard():
 
 @bot.message_handler(commands=['start', 'menu'])
 def send_welcome(message):
-    # Send a friendly welcome GIF (optional)
     try:
         bot.send_animation(
             message.chat.id,
             "https://media.giphy.com/media/3o7aTskHEUdgCQAXde/giphy.gif",
-            caption="🤖 Welcome to the Gemini Script Editor Bot!"
+            caption="🤖 Welcome to the Script Editor Bot (Powered by Puter.js + Gemini)!"
         )
     except:
         pass
 
     welcome_text = (
-        "🤖 **Welcome to the Gemini Script Editor Bot!**\n\n"
-        "I use **Google Gemini** to edit or generate Python scripts, and also answer general questions.\n"
+        "🤖 **Welcome to the Script Editor Bot!**\n\n"
+        "I use **Google Gemini** (via Puter.js) to edit or generate Python scripts.\n"
         "Use the buttons below to get started."
     )
     bot.send_message(
@@ -115,11 +109,9 @@ def handle_text(message):
     chat_id = message.chat.id
     user_text = message.text.strip()
 
-    # Check if the user has a script stored
     has_script = chat_id in user_data
     script_content = user_data.get(chat_id, "")
 
-    # ------------------- Determine request type -------------------
     is_generation = bool(re.search(
         r'(write|create|generate|make|new)\s+(a\s+)?(script|code|program|function)',
         user_text, re.IGNORECASE
@@ -130,22 +122,21 @@ def handle_text(message):
         user_text, re.IGNORECASE
     )) or bool(re.search(r'\b(function|variable|class|method|import)\b', user_text, re.IGNORECASE))
 
-    # ------------------- Branch logic -------------------
     if is_generation:
         anim_msg = bot.send_message(chat_id, "⏳ *Generating new script...*", parse_mode='Markdown')
         time.sleep(0.8)
-        bot.edit_message_text("🧠 *Gemini is writing the code...*", chat_id, anim_msg.message_id, parse_mode='Markdown')
+        bot.edit_message_text("🧠 *AI is writing the code...*", chat_id, anim_msg.message_id, parse_mode='Markdown')
         try:
-            new_script = call_gemini_edit("", user_text, is_new=True)
+            new_script = call_ai_edit("", user_text, is_new=True)
             user_data[chat_id] = new_script
             bot.edit_message_text("✅ *Script generated!*", chat_id, anim_msg.message_id, parse_mode='Markdown')
             send_updated_file(message, new_script, "Here is your new script.")
         except Exception as e:
-            bot.edit_message_text(f"❌ Gemini error: {e}", chat_id, anim_msg.message_id, parse_mode='Markdown')
+            bot.edit_message_text(f"❌ AI error: {e}", chat_id, anim_msg.message_id, parse_mode='Markdown')
         return
 
     if is_edit and has_script:
-        # Fast regex fallback (no API cost)
+        # Fast regex fallback
         command, old, new = parse_command(user_text)
         if command is not None:
             modified = apply_replacement(script_content, old, new)
@@ -153,17 +144,16 @@ def handle_text(message):
             send_updated_file(message, modified, f"✅ Replaced `{old}` → `{new}`")
             return
 
-        # Gemini edit
         anim_msg = bot.send_message(chat_id, "⏳ *Analyzing your request...*", parse_mode='Markdown')
         time.sleep(0.8)
-        bot.edit_message_text("🧠 *Gemini is editing...*", chat_id, anim_msg.message_id, parse_mode='Markdown')
+        bot.edit_message_text("🧠 *AI is editing...*", chat_id, anim_msg.message_id, parse_mode='Markdown')
         try:
-            modified = call_gemini_edit(script_content, user_text, is_new=False)
+            modified = call_ai_edit(script_content, user_text, is_new=False)
             user_data[chat_id] = modified
             bot.edit_message_text("✅ *Script updated!*", chat_id, anim_msg.message_id, parse_mode='Markdown')
             send_updated_file(message, modified, "Here is your updated script.")
         except Exception as e:
-            bot.edit_message_text(f"❌ Gemini error: {e}", chat_id, anim_msg.message_id, parse_mode='Markdown')
+            bot.edit_message_text(f"❌ AI error: {e}", chat_id, anim_msg.message_id, parse_mode='Markdown')
         return
 
     if is_edit and not has_script:
@@ -174,58 +164,37 @@ def handle_text(message):
         )
         return
 
-    # ---------- GENERAL QUESTION (no code modification) ----------
+    # GENERAL QUESTION
     anim_msg = bot.send_message(chat_id, "⏳ *Thinking...*", parse_mode='Markdown')
     time.sleep(0.6)
     try:
-        answer = ask_gemini_question(user_text)
+        answer = ask_general_question(user_text)
         bot.edit_message_text(answer, chat_id, anim_msg.message_id, parse_mode='Markdown')
     except Exception as e:
         bot.edit_message_text(f"❌ Error: {e}", chat_id, anim_msg.message_id, parse_mode='Markdown')
 
-# =============== HELPER FUNCTIONS (Gemini) ===============
+# =============== HELPER FUNCTIONS (HTTP to Node server) ===============
 
-def call_gemini_edit(original_script, instruction, is_new=False):
-    """
-    Use Gemini to edit or generate a Python script.
-    Returns pure code without markdown fences.
-    """
-    model = genai.GenerativeModel(GEMINI_MODEL)
-
+def call_ai_edit(original_script, instruction, is_new=False):
+    """Calls the Node.js AI server to generate or edit a script."""
     if is_new:
-        prompt = (
-            f"You are an expert Python developer. Write a new Python script based on the user's request. "
-            f"Output ONLY the Python code, no explanations, no markdown formatting.\n\n"
-            f"User request: {instruction}"
-        )
+        endpoint = f"{AI_SERVER_URL}/generate"
+        payload = {"instruction": instruction}
     else:
-        prompt = (
-            f"You are an expert Python developer. Modify the given script according to the user's instruction. "
-            f"Output ONLY the full, updated Python code, no extra text.\n\n"
-            f"Original script:\n```python\n{original_script}\n```\n\n"
-            f"Instruction: {instruction}"
-        )
+        endpoint = f"{AI_SERVER_URL}/edit"
+        payload = {"original_script": original_script, "instruction": instruction}
 
-    response = model.generate_content(prompt)
-    output = response.text.strip()
+    resp = requests.post(endpoint, json=payload, timeout=60)
+    if resp.status_code != 200:
+        raise Exception(resp.json().get('error', 'Unknown AI error'))
+    return resp.json()['code']
 
-    # Remove markdown code fences if present
-    if output.startswith("```python"):
-        output = output[9:]
-        if output.endswith("```"):
-            output = output[:-3]
-    elif output.startswith("```"):
-        output = output[3:]
-        if output.endswith("```"):
-            output = output[:-3]
-
-    return output.strip()
-
-def ask_gemini_question(question):
-    """Answer any general question using Gemini."""
-    model = genai.GenerativeModel(GEMINI_MODEL)
-    response = model.generate_content(question)
-    return response.text.strip()
+def ask_general_question(question):
+    endpoint = f"{AI_SERVER_URL}/ask"
+    resp = requests.post(endpoint, json={"question": question}, timeout=60)
+    if resp.status_code != 200:
+        raise Exception(resp.json().get('error', 'Unknown AI error'))
+    return resp.json()['answer']
 
 def send_updated_file(message, script_content, caption):
     chat_id = message.chat.id
@@ -269,5 +238,5 @@ def apply_replacement(script, old, new):
 
 # ================ START BOT =================
 
-print("🤖 Gemini Script Editor Bot is running...")
+print("🤖 Script Editor Bot is running...")
 bot.infinity_polling()
