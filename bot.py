@@ -2,19 +2,19 @@ import telebot
 import re
 import time
 import os
-from openai import OpenAI
+import google.generativeai as genai
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================= CONFIG =================
-# For security, use environment variables:
-# BOT_TOKEN = os.getenv("BOT_TOKEN")
-# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# But we embed yours as requested:
-BOT_TOKEN = "6935043231:AAHtr9ZhvIsTQxVhN4u_LvqEPN3KzK12whs"  # <-- change this
-OPENAI_API_KEY = "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"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "6935043231:AAHtr9ZhvIsTQxVhN4u_LvqEPN3KzK12whs")
+GEMINI_API_KEY = "AQ.Ab8RN6JuAszSqx3NLGG5at_E-61MM6PYkhRLspY3esn21q862Q"  # your key
+
+# Configure Gemini
+genai.configure(api_key=GEMINI_API_KEY)
+# Use a stable model – you can change to "gemini-1.5-pro" or "gemini-2.0-flash-exp" if available
+GEMINI_MODEL = "gemini-1.5-flash"
 
 bot = telebot.TeleBot(BOT_TOKEN)
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 # In-memory storage for user scripts
 user_data = {}
@@ -33,19 +33,19 @@ def main_menu_keyboard():
 
 @bot.message_handler(commands=['start', 'menu'])
 def send_welcome(message):
-    # Send a valid welcome animation (GIF) – this URL works
+    # Send a friendly welcome GIF (optional)
     try:
         bot.send_animation(
             message.chat.id,
-            "https://media.giphy.com/media/3o7aTskHEUdgCQAXde/giphy.gif",  # friendly robot wave
-            caption="🤖 Welcome to the Pro Script Editor Bot!"
+            "https://media.giphy.com/media/3o7aTskHEUdgCQAXde/giphy.gif",
+            caption="🤖 Welcome to the Gemini Script Editor Bot!"
         )
     except:
-        pass  # fallback if the GIF fails
+        pass
 
     welcome_text = (
-        "🤖 **Welcome to the Pro Script Editor Bot!**\n\n"
-        "I can edit or generate Python scripts using AI, and also answer general questions.\n"
+        "🤖 **Welcome to the Gemini Script Editor Bot!**\n\n"
+        "I use **Google Gemini** to edit or generate Python scripts, and also answer general questions.\n"
         "Use the buttons below to get started."
     )
     bot.send_message(
@@ -134,18 +134,18 @@ def handle_text(message):
     if is_generation:
         anim_msg = bot.send_message(chat_id, "⏳ *Generating new script...*", parse_mode='Markdown')
         time.sleep(0.8)
-        bot.edit_message_text("🧠 *AI is writing the code...*", chat_id, anim_msg.message_id, parse_mode='Markdown')
+        bot.edit_message_text("🧠 *Gemini is writing the code...*", chat_id, anim_msg.message_id, parse_mode='Markdown')
         try:
-            new_script = call_openai_edit("", user_text, is_new=True)
+            new_script = call_gemini_edit("", user_text, is_new=True)
             user_data[chat_id] = new_script
             bot.edit_message_text("✅ *Script generated!*", chat_id, anim_msg.message_id, parse_mode='Markdown')
             send_updated_file(message, new_script, "Here is your new script.")
         except Exception as e:
-            bot.edit_message_text(f"❌ AI error: {e}", chat_id, anim_msg.message_id, parse_mode='Markdown')
+            bot.edit_message_text(f"❌ Gemini error: {e}", chat_id, anim_msg.message_id, parse_mode='Markdown')
         return
 
     if is_edit and has_script:
-        # Fast regex fallback
+        # Fast regex fallback (no API cost)
         command, old, new = parse_command(user_text)
         if command is not None:
             modified = apply_replacement(script_content, old, new)
@@ -153,17 +153,17 @@ def handle_text(message):
             send_updated_file(message, modified, f"✅ Replaced `{old}` → `{new}`")
             return
 
-        # AI edit
+        # Gemini edit
         anim_msg = bot.send_message(chat_id, "⏳ *Analyzing your request...*", parse_mode='Markdown')
         time.sleep(0.8)
-        bot.edit_message_text("🧠 *Editing with AI...*", chat_id, anim_msg.message_id, parse_mode='Markdown')
+        bot.edit_message_text("🧠 *Gemini is editing...*", chat_id, anim_msg.message_id, parse_mode='Markdown')
         try:
-            modified = call_openai_edit(script_content, user_text, is_new=False)
+            modified = call_gemini_edit(script_content, user_text, is_new=False)
             user_data[chat_id] = modified
             bot.edit_message_text("✅ *Script updated!*", chat_id, anim_msg.message_id, parse_mode='Markdown')
             send_updated_file(message, modified, "Here is your updated script.")
         except Exception as e:
-            bot.edit_message_text(f"❌ AI error: {e}", chat_id, anim_msg.message_id, parse_mode='Markdown')
+            bot.edit_message_text(f"❌ Gemini error: {e}", chat_id, anim_msg.message_id, parse_mode='Markdown')
         return
 
     if is_edit and not has_script:
@@ -178,44 +178,38 @@ def handle_text(message):
     anim_msg = bot.send_message(chat_id, "⏳ *Thinking...*", parse_mode='Markdown')
     time.sleep(0.6)
     try:
-        answer = ask_general_question(user_text)
+        answer = ask_gemini_question(user_text)
         bot.edit_message_text(answer, chat_id, anim_msg.message_id, parse_mode='Markdown')
     except Exception as e:
         bot.edit_message_text(f"❌ Error: {e}", chat_id, anim_msg.message_id, parse_mode='Markdown')
 
-# =============== HELPER FUNCTIONS ===============
+# =============== HELPER FUNCTIONS (Gemini) ===============
 
-def call_openai_edit(original_script, instruction, is_new=False):
-    """Use the provided model ('gpt-5.4-mini' as requested) for editing/generating code."""
-    model = "gpt-5.4-mini"  # you can change to "gpt-4o-mini" if needed
+def call_gemini_edit(original_script, instruction, is_new=False):
+    """
+    Use Gemini to edit or generate a Python script.
+    Returns pure code without markdown fences.
+    """
+    model = genai.GenerativeModel(GEMINI_MODEL)
 
     if is_new:
-        system_prompt = (
-            "You are an expert Python developer. Write a new Python script based on the user's request. "
-            "Output ONLY the Python code, no explanations, no markdown formatting."
+        prompt = (
+            f"You are an expert Python developer. Write a new Python script based on the user's request. "
+            f"Output ONLY the Python code, no explanations, no markdown formatting.\n\n"
+            f"User request: {instruction}"
         )
-        user_prompt = f"Write a Python script that does the following:\n{instruction}"
     else:
-        system_prompt = (
-            "You are an expert Python developer. Modify the given script according to the user's instruction. "
-            "Output ONLY the full, updated Python code, no extra text."
+        prompt = (
+            f"You are an expert Python developer. Modify the given script according to the user's instruction. "
+            f"Output ONLY the full, updated Python code, no extra text.\n\n"
+            f"Original script:\n```python\n{original_script}\n```\n\n"
+            f"Instruction: {instruction}"
         )
-        user_prompt = f"Original script:\n```python\n{original_script}\n```\n\nInstruction: {instruction}"
 
-    # Using the new 'responses.create' method as you asked, but we can also use chat.completions.
-    # For code generation, we'll use chat.completions because it's more robust with system prompts.
-    # We'll still use your model name.
-    response = openai_client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        temperature=0.2,
-        max_tokens=3000
-    )
-    output = response.choices[0].message.content.strip()
-    # Clean markdown fences
+    response = model.generate_content(prompt)
+    output = response.text.strip()
+
+    # Remove markdown code fences if present
     if output.startswith("```python"):
         output = output[9:]
         if output.endswith("```"):
@@ -224,17 +218,14 @@ def call_openai_edit(original_script, instruction, is_new=False):
         output = output[3:]
         if output.endswith("```"):
             output = output[:-3]
+
     return output.strip()
 
-def ask_general_question(question):
-    """Answer general questions using the responses API (as you requested)."""
-    # Using the exact client.responses.create as in your snippet
-    response = openai_client.responses.create(
-        model="gpt-5.4-mini",  # your model name
-        input=question,
-        store=True,
-    )
-    return response.output_text
+def ask_gemini_question(question):
+    """Answer any general question using Gemini."""
+    model = genai.GenerativeModel(GEMINI_MODEL)
+    response = model.generate_content(question)
+    return response.text.strip()
 
 def send_updated_file(message, script_content, caption):
     chat_id = message.chat.id
@@ -278,5 +269,5 @@ def apply_replacement(script, old, new):
 
 # ================ START BOT =================
 
-print("🤖 Pro Script Editor Bot is running...")
+print("🤖 Gemini Script Editor Bot is running...")
 bot.infinity_polling()
