@@ -1,2 +1,2 @@
-web: cd ai-server && npm start
+web: npm start
 worker: python bot.py
