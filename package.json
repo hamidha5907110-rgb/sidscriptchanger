@@ -2,6 +2,9 @@
   "name": "ai-server",
   "version": "1.0.0",
   "type": "module",
+  "scripts": {
+    "start": "node ai-server.js"
+  },
   "dependencies": {
     "express": "^4.18.2",
     "@heyputer/puter.js": "^2.0.0"
