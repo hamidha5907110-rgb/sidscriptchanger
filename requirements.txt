@@ -1,2 +1,4 @@
 pyTelegramBotAPI>=4.16.0
 requests>=2.31.0
+export AI_SERVER_URL="http://localhost:3000"
+python bot.py
