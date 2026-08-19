@@ -6,7 +6,7 @@ from openai import OpenAI
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================= CONFIG =================
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"  # Replace with your bot token
+BOT_TOKEN = "6935043231:AAHtr9ZhvIsTQxVhN4u_LvqEPN3KzK12whs"  # Replace with your bot token
 OPENAI_API_KEY = "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"
 
 bot = telebot.TeleBot(BOT_TOKEN)
