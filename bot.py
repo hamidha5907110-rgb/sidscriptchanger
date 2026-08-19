@@ -5,9 +5,12 @@ import os
 from openai import OpenAI
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# ================= CONFIG =================
-BOT_TOKEN = "6935043231:AAHtr9ZhvIsTQxVhN4u_LvqEPN3KzK12whs"  # Replace with your bot token
-OPENAI_API_KEY = "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"
+# ================= CONFIG (from environment) =================
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+if not BOT_TOKEN or not OPENAI_API_KEY:
+    raise ValueError("Missing BOT_TOKEN or OPENAI_API_KEY environment variables.")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
@@ -29,18 +32,6 @@ def main_menu_keyboard():
 
 @bot.message_handler(commands=['start', 'menu'])
 def send_welcome(message):
-    # Send a welcome animation (you can replace with your own sticker or GIF)
-    try:
-        # Example sticker ID – replace with your own or remove
-        sticker_id = "CAACAgIAAxkBAAE..."  # change to your real sticker file_id
-        bot.send_sticker(message.chat.id, sticker_id)
-    except:
-        # Fallback: send a nice GIF
-        bot.send_animation(
-            message.chat.id,
-            "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZ..."  # replace with any GIF URL
-        )
-
     welcome_text = (
         "🤖 **Welcome to the Pro Script Editor Bot!**\n\n"
         "I can edit or generate Python scripts using AI, and also answer general questions.\n"
@@ -118,24 +109,20 @@ def handle_text(message):
     script_content = user_data.get(chat_id, "")
 
     # ------------------- Determine request type -------------------
-    # 1. Is it a code‑generation request? (even without a script)
     is_generation = bool(re.search(
         r'(write|create|generate|make|new)\s+(a\s+)?(script|code|program|function)',
         user_text, re.IGNORECASE
     ))
 
-    # 2. Is it a code‑editing request? (needs an existing script)
     is_edit = bool(re.search(
         r'(change|rename|replace|add|remove|delete|update|modify|edit)\s+',
         user_text, re.IGNORECASE
     )) or bool(re.search(r'\b(function|variable|class|method|import)\b', user_text, re.IGNORECASE))
 
-    # 3. General question (anything else)
     is_general = not (is_generation or is_edit)
 
     # ------------------- Branch logic -------------------
     if is_generation:
-        # Generate new script (no need for existing script)
         anim_msg = bot.send_message(chat_id, "⏳ *Generating new script...*", parse_mode='Markdown')
         time.sleep(0.8)
         bot.edit_message_text("🧠 *AI is writing the code...*", chat_id, anim_msg.message_id, parse_mode='Markdown')
@@ -149,8 +136,7 @@ def handle_text(message):
         return
 
     if is_edit and has_script:
-        # Edit existing script
-        # Fast regex fallback first
+        # Fast regex fallback
         command, old, new = parse_command(user_text)
         if command is not None:
             modified = apply_replacement(script_content, old, new)
@@ -158,7 +144,7 @@ def handle_text(message):
             send_updated_file(message, modified, f"✅ Replaced `{old}` → `{new}`")
             return
 
-        # Otherwise, use AI to edit
+        # AI edit
         anim_msg = bot.send_message(chat_id, "⏳ *Analyzing your request...*", parse_mode='Markdown')
         time.sleep(0.8)
         bot.edit_message_text("🧠 *Editing with AI...*", chat_id, anim_msg.message_id, parse_mode='Markdown')
@@ -180,7 +166,6 @@ def handle_text(message):
         return
 
     # ---------- GENERAL QUESTION (no code modification) ----------
-    # Send a normal AI reply (without sending a .py file)
     anim_msg = bot.send_message(chat_id, "⏳ *Thinking...*", parse_mode='Markdown')
     time.sleep(0.6)
     try:
@@ -192,7 +177,6 @@ def handle_text(message):
 # =============== HELPER FUNCTIONS ===============
 
 def call_openai_edit(original_script, instruction, is_new=False):
-    """Edit or generate a script via OpenAI, returns pure code."""
     if is_new:
         system_prompt = (
             "You are an expert Python developer. Write a new Python script based on the user's request. "
@@ -216,7 +200,7 @@ def call_openai_edit(original_script, instruction, is_new=False):
         max_tokens=3000
     )
     output = response.choices[0].message.content.strip()
-    # Clean markdown fences
+    # Remove markdown fences if present
     if output.startswith("```python"):
         output = output[9:]
         if output.endswith("```"):
@@ -228,7 +212,6 @@ def call_openai_edit(original_script, instruction, is_new=False):
     return output.strip()
 
 def ask_general_question(question):
-    """Answer any general question using AI (no code)."""
     response = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -254,7 +237,6 @@ def send_updated_file(message, script_content, caption):
         if os.path.exists(filename):
             os.remove(filename)
 
-# ----- Fast regex replacement (fallback) -----
 def parse_command(text):
     match = re.search(
         r'rename\s+(function|variable|func|var)\s+[\'"]?(.+?)[\'"]?\s+to\s+[\'"]?(.+?)[\'"]?$',
